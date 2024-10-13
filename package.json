@@ -1,6 +1,6 @@
 {
   "name": "magus-library",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A utilitarian library for Scryfall ant MTG-related projects",
   "main": "lib/main/index.js",
   "typings": "lib/main/index.d.ts",
@@ -24,7 +24,7 @@
   "scripts": {
     "build": "run-p build:*",
     "build:main": "npx spack",
-    "minify": "npx minify lib/web.js > dist/magus-library.min.js",
+    "minify": "head --lines=-1 lib/web.js | npx minify --js > dist/magus-library.min.js",
     "bundle": "run-p build && run-p minify",
     "fix": "run-s fix:*",
     "fix:prettier": "prettier \"src/**/*.ts\" --write",
