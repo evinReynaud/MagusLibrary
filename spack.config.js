@@ -2,10 +2,9 @@ const { config } = require("@swc/core/spack");
 
 module.exports = config({
   entry: {
-    // web: __dirname + "/src/index.ts",
-    web: __dirname + "/lib/main/index.js",
+    web: __dirname + "/src/index.ts",
   },
   output: {
-    path: __dirname + "/lib/spack",
+    path: __dirname + "/lib",
   },
 });
