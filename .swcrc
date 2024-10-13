@@ -5,17 +5,9 @@
   // Optional, configure minification options
   "jsc": {
     "parser": {
-      "syntax": "ecmascript",
-      "jsx": false,
+      "syntax": "typescript",
+      "tsx": false,
       "dynamicImport": false,
-      "privateMethod": false,
-      "functionBind": false,
-      "exportDefaultFrom": false,
-      "exportNamespaceFrom": false,
-      "decorators": false,
-      "decoratorsBeforeExport": false,
-      "topLevelAwait": false,
-      "importMeta": false
     },
     "transform": null,
     "target": "es5",
