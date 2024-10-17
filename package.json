@@ -1,6 +1,6 @@
 {
   "name": "magus-library",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A utilitarian library for Scryfall ant MTG-related projects",
   "main": "lib/main/index.js",
   "typings": "lib/main/index.d.ts",
