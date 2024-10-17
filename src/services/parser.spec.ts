@@ -2,7 +2,7 @@ import test from 'ava';
 
 import {ParsedCard} from "../types";
 
-import {parseString} from './parser';
+import {parseMTGCardString} from './parser';
 
 test('parse', (t) => {
     const testCases: Map<string, ParsedCard> = new Map();
@@ -61,6 +61,6 @@ test('parse', (t) => {
     });
 
     testCases.forEach((expected, input) => {
-        t.deepEqual(parseString(input), expected)
+        t.deepEqual(parseMTGCardString(input), expected)
     });
 });

@@ -1,7 +1,5 @@
 import {ParsedCard} from '../types';
 
-import {parseFlags} from './parser.utils';
-
 /*
  * Parses a string to extract requested card data
  * Format:
@@ -12,7 +10,7 @@ import {parseFlags} from './parser.utils';
  * If a same flag is defined multiple times, the latest overwrites the previous instances.
  * Examples: -flag -string=data
  */
-export function parseString(input: string): ParsedCard | undefined {
+export function parseMTGCardString(input: string): ParsedCard | undefined {
 
     const regexp = /^(?:([0-9]+)\s+)?(.*?)((?:\s-[a-zA-Z]+(?:=\S*)?)*)?$/;
     const match = input.match(regexp);
@@ -36,4 +34,17 @@ export function parseString(input: string): ParsedCard | undefined {
         language: language,
         customFlags: flags
     };
+}
+
+function parseFlags(flags: string | undefined): Map<string, string> {
+    const flagsMap: Map<string, string> = new Map();
+    if (!flags) {
+        return flagsMap;
+    }
+    const regexp = /\s-([a-zA-Z]+)(?:=(\S*))?/g;
+    const matchAll = [...flags.matchAll(regexp)];
+
+    matchAll.forEach(match => flagsMap.set(match[1], match[2] || 'true'));
+
+    return flagsMap;
 }
