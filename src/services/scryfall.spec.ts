@@ -2,7 +2,7 @@ import test from 'ava';
 
 import { ParsedCard } from '../types';
 
-import { getCard, getCardsBatch } from './scryfall';
+import { getCard, getCardsAndDo, getCardsBatch } from './scryfall';
 
 const testCases: Map<string, string> = new Map();
 testCases.set('Black Lotus', 'Black Lotus');
@@ -16,10 +16,10 @@ testCases.set('56ebc372-aabd-4174-a943-c7bf59e5028d', 'Phantom Nishoba');
 testCases.forEach((expected, input) => {
   test(`getCard ${input}`, (t) => {
     const card: ParsedCard = {
-      customFlags: new Map(),
-      language: undefined,
       name: input,
       quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
     };
 
     return getCard(card).then((res) =>
@@ -30,10 +30,10 @@ testCases.forEach((expected, input) => {
 
 test('language override', (t) => {
   const card: ParsedCard = {
-    customFlags: new Map(),
-    language: 'fr',
     name: 'm3c/331/de',
     quantity: 0,
+    language: 'fr',
+    customFlags: new Map(),
   };
 
   return getCard(card).then((res) =>
@@ -43,35 +43,89 @@ test('language override', (t) => {
 
 test('Unknown card', (t) => {
   const card: ParsedCard = {
-    customFlags: new Map(),
-    language: undefined,
-    name: 'Ceci n\'est pas une carte.',
+    name: "Ceci n'est pas une carte.",
     quantity: 0,
+    language: undefined,
+    customFlags: new Map(),
   };
 
-  return getCard(card).then((res) =>
-    t.is(res, undefined)
-  );
+  return getCard(card).then((res) => t.is(res, undefined));
 });
 
 test('batch fetch', (t) => {
   const cards: ParsedCard[] = [
     {
-      customFlags: new Map(),
-      language: 'fr',
       name: 'm3c/331/de',
       quantity: 0,
+      language: 'fr',
+      customFlags: new Map(),
     },
     {
-      customFlags: new Map(),
-      language: undefined,
       name: 'Black Lotus',
       quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
     },
   ];
   const expectedNames = ['Tour de commandement', 'Black Lotus'];
   return getCardsBatch(cards).then((res) => {
-    const fetchedNames = res.map(card => card?.printed_name || card?.name);
+    const fetchedNames = res.map((card) => card?.printed_name || card?.name);
     return t.deepEqual(fetchedNames, expectedNames);
+  });
+});
+
+////////////////////////////////////////////////////////////////////////////////
+//                               getCardsAndDo                                //
+////////////////////////////////////////////////////////////////////////////////
+
+test('getCardsAndDo', (t) => {
+  const input = [
+    {
+      name: 'Black Lotus',
+      quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
+      customData: 'This is a Black Lotus',
+    },
+    {
+      name: 'Tour de commande',
+      quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
+      customData: 'This is a Tour de commandement',
+    },
+    {
+      name: 'm3c/331/de',
+      quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
+      customData: 'This is a Befehlsturm',
+    },
+  ];
+
+  const results: { name: string; ok: boolean }[] = [];
+  return getCardsAndDo(input, (data, card) => {
+    if (
+      data.customData &&
+      data.customData === `This is a ${card?.printed_name || card?.name}`
+    ) {
+      results.push({ name: data.name, ok: true });
+    } else {
+      results.push({ name: data.name, ok: false });
+    }
+  }).then(() => {
+    if (results.length !== input.length) {
+      return t.fail();
+    }
+    const inputNames = input.map((i) => i.name);
+    const resultNames = results.map((r) => r.name);
+
+    if (!inputNames.every((name) => resultNames.includes(name))) {
+      t.fail();
+    }
+    if (!results.every((r) => r.ok)) {
+      t.fail();
+    }
+    return t.pass();
   });
 });
