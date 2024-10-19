@@ -2,7 +2,12 @@ import test from 'ava';
 
 import { ParsedCard } from '../types';
 
-import { getCard, getCardsAndDo, getCardsBatch } from './scryfall';
+import {
+  getCard,
+  getCardPrintsAndDo,
+  getCardsAndDo,
+  getCardsBatch,
+} from './scryfall';
 
 const testCases: Map<string, string> = new Map();
 testCases.set('Black Lotus', 'Black Lotus');
@@ -127,5 +132,62 @@ test('getCardsAndDo', (t) => {
       t.fail();
     }
     return t.pass();
+  });
+});
+
+test('getCardsAndDoError', (t) => {
+  let outcome: string;
+  return getCardsAndDo(
+    [
+      {
+        name: "Ceci n'est pas une carte.",
+        quantity: 0,
+        language: undefined,
+        customFlags: new Map(),
+        customData: 'This is a not a card',
+      },
+    ],
+    (input, foundCards) => {
+      if (input.customData !== 'This is a not a card') {
+        outcome = 'No custom data';
+      } else if (foundCards !== undefined) {
+        outcome = 'card is defined';
+      } else {
+        outcome = 'success';
+      }
+    }
+  ).then(() => {
+    return t.is(outcome, 'success')
+  });
+});
+
+
+////////////////////////////////////////////////////////////////////////////////
+//                             getCardPrintsAndDo                             //
+////////////////////////////////////////////////////////////////////////////////
+
+test('getCardPrintsAndDoError', (t) => {
+  let outcome: string;
+  return getCardPrintsAndDo(
+    [
+      {
+        name: "Ceci n'est pas une carte.",
+        quantity: 0,
+        language: undefined,
+        customFlags: new Map(),
+        customData: 'This is a not a card',
+      },
+    ],
+    (input, foundCards) => {
+      if (input.customData !== 'This is a not a card') {
+        outcome = 'No custom data';
+      } else if (foundCards !== undefined) {
+        outcome = 'card is defined';
+      } else {
+        outcome = 'success';
+      }
+    }
+  ).then(() => {
+    return t.is(outcome, 'success')
   });
 });
