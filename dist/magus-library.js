@@ -26,7 +26,7 @@ function t(t) {
 }
 const e = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const n = /^[a-zA-Z0-9]{3,5}\/[^/]+(?:\/(?:[a-zA-Z]{2,3})?)?$/;
-const a = [
+const t1 = [
     'en',
     'es',
     'fr',
@@ -39,38 +39,57 @@ const a = [
     'zhs',
     'zht'
 ];
-const t1 = 'https://api.scryfall.com';
-async function o(e) {
+const a = 'https://api.scryfall.com';
+async function r(e) {
     return new Promise((n)=>{
         setTimeout(n, e);
     });
 }
 async function getCard(s) {
-    let o;
-    if (e.test(s.name)) o = `https://api.scryfall.com/cards/${s.name}`;
+    let r;
+    if (e.test(s.name)) r = `${a}/cards/${s.name}`;
     else if (n.test(s.name)) {
         let e = s.name;
-        if (s.language != undefined && a.includes(s.language)) e = s.name.split('/').slice(0, 2).join('/') + `/${s.language}`;
-        o = `${t1}/cards/${e}`;
-    } else o = `${t1}/cards/named/?fuzzy=${encodeURIComponent(s.name)}`;
-    const c = fetch(o);
-    const r = await c;
-    if (r.ok) return await r.json();
-    else return undefined;
+        if (s.language != null && t1.includes(s.language)) e = s.name.split('/').slice(0, 2).join('/') + `/${s.language}`;
+        r = `${a}/cards/${e}`;
+    } else r = `${a}/cards/named/?fuzzy=${encodeURIComponent(s.name)}`;
+    const o = fetch(r);
+    const u = await o;
+    if (u.ok) return await u.json();
+    else return Promise.resolve(undefined);
+}
+async function o(e, n = false, t = true) {
+    const a = n ? `${e.prints_search_uri}&include_multilingual=true` : e.prints_search_uri;
+    const s = await fetch(a);
+    if (s.ok) return await s.json().then((e)=>e.data).then((e)=>t ? e.filter((e)=>e.games.includes('paper')) : e);
+    else return Promise.resolve(undefined);
 }
 async function getCardsBatch(e) {
-    return await Promise.all(e.map((e, n)=>o(n * 100).then(()=>getCard(e))));
+    return await Promise.all(e.map((e, n)=>r(n * 100).then(()=>getCard(e))));
 }
 async function getCardsAndDo(e, n) {
-    const a = [];
-    e.forEach((e, t)=>{
-        const c = o(t * 100).then(()=>getCard({
+    const t = [];
+    e.forEach((e, a)=>{
+        const o = r(a * 100).then(()=>getCard({
                 name: e.name,
                 quantity: e.quantity,
                 language: e.language,
                 customFlags: e.customFlags
-            }).then((a)=>n(e, a)));
-        a.push(c);
+            }).then((t)=>n(e, t)));
+        t.push(o);
     });
-    return Promise.all(a).then();
+    return Promise.all(t).then();
+}
+async function getCardPrintsAndDo(e, n, t = false, a = true) {
+    const u = [];
+    e.forEach((e, i)=>{
+        const c = r(i * 100).then(()=>getCard({
+                name: e.name,
+                quantity: e.quantity,
+                language: e.language,
+                customFlags: e.customFlags
+            })).then((e)=>e !== undefined ? o(e, t, a) : Promise.resolve(undefined)).then((t)=>n(e, t));
+        u.push(c);
+    });
+    return Promise.all(u).then();
 }
