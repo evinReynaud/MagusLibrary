@@ -23,7 +23,7 @@ testCases.forEach((expected, input) => {
     };
 
     return getCard(card).then((res) =>
-      t.is(res.printed_name || res.name, expected)
+      t.is(res?.printed_name || res?.name, expected)
     );
   });
 });
@@ -37,7 +37,20 @@ test('language override', (t) => {
   };
 
   return getCard(card).then((res) =>
-    t.is(res.printed_name, 'Tour de commandement')
+    t.is(res?.printed_name, 'Tour de commandement')
+  );
+});
+
+test('Unknown card', (t) => {
+  const card: ParsedCard = {
+    customFlags: new Map(),
+    language: undefined,
+    name: 'Ceci n\'est pas une carte.',
+    quantity: 0,
+  };
+
+  return getCard(card).then((res) =>
+    t.is(res, undefined)
   );
 });
 
@@ -58,7 +71,7 @@ test('batch fetch', (t) => {
   ];
   const expectedNames = ['Tour de commandement', 'Black Lotus'];
   return getCardsBatch(cards).then((res) => {
-    const fetchedNames = res.map(card => card.printed_name || card.name);
+    const fetchedNames = res.map(card => card?.printed_name || card?.name);
     return t.deepEqual(fetchedNames, expectedNames);
   });
 });
