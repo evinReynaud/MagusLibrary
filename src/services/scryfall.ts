@@ -53,23 +53,14 @@ export class ScryfallService {
       }/cards/named/?fuzzy=${encodeURIComponent(parsedCard.name)}`;
     }
 
-    return this.delayer
-      .execute(() => fetch(requestURI))
-      .then((res) => {
-        if (res.ok) {
-          return res.json();
-        } else {
-          return Promise.resolve(undefined);
-        }
-      });
+    return this._callApi(requestURI);
   }
 
-  /* Given a ScryfallCard, return all prints of tha card.
+  /* Given a ScryfallCard, return all prints of that card.
    * DO NOT call this function repetitively as it is not buffered and could lead
    * you to be blocked by Scryfall.
    * Instead use the dedicated getCardPrintsAndDo() function.
    */
-
   public getCardPrintsFromCard(
     scryfallCard: ScryfallCard,
     includeMultilingual = false,
@@ -78,22 +69,10 @@ export class ScryfallService {
     const url = includeMultilingual
       ? `${scryfallCard.prints_search_uri}&include_multilingual=true`
       : scryfallCard.prints_search_uri;
-    return this.delayer
-      .execute(() => fetch(url))
-      .then((res) => {
-        if (res.ok) {
-          return res
-            .json()
-            .then((json) => json.data)
-            .then((cards: ScryfallCard[]) =>
-              onlyPaper
-                ? cards.filter((card) => card.games.includes('paper'))
-                : cards
-            );
-        } else {
-          return Promise.resolve(undefined);
-        }
-      });
+
+    return this._getListFromApi(url, (cards: ScryfallCard[]) =>
+      onlyPaper ? cards.filter((card) => card.games.includes('paper')) : cards
+    );
   }
 
   /* Calls the Scryfall API with delay to fetch cards data for the given
@@ -163,5 +142,54 @@ export class ScryfallService {
       promises.push(promise);
     });
     return Promise.all(promises).then();
+  }
+
+  /* This function fetches a URI expected to return a list, and then fetches all
+   * the pages in the list.
+   *
+   * It is public only for testing and should not be used directly by the consumer
+   */
+  public _getListFromApi<T, U>(
+    uri: string,
+    successCallback: (listData: T[]) => U | Promise<U>
+  ): Promise<U | undefined> {
+    return this._callApi(
+      uri,
+      (json: {
+        data: T[];
+        has_more: boolean;
+        next_page: string | undefined;
+      }) => {
+        const data = json.data;
+        if (json.has_more && json.next_page !== undefined) {
+          return this._getListFromApi(json.next_page, (listData: T[]) => [
+            ...json.data,
+            ...listData,
+          ]).then((allData: T[] | undefined) => {
+            if (allData !== undefined) {
+              return successCallback(allData);
+            } else {
+              return undefined;
+            }
+          });
+        } else {
+          return successCallback(data);
+        }
+      }
+    );
+  }
+
+  /* This function factorizes some code for the handling of responses from the api.
+   */
+  private async _callApi<T>(
+    uri: string,
+    successCallback: (json: any) => T | Promise<T> = (json) => json
+  ): Promise<T | undefined> {
+    const res = await this.delayer.execute(() => fetch(uri));
+    if (res.ok) {
+      return res.json().then(successCallback);
+    } else {
+      return Promise.resolve(undefined);
+    }
   }
 }

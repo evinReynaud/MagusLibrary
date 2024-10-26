@@ -193,3 +193,17 @@ test('getCardPrintsAndDoError', (t) => {
       return t.is(outcome, 'success');
     });
 });
+
+////////////////////////////////////////////////////////////////////////////////
+//                               getListFromApi                               //
+////////////////////////////////////////////////////////////////////////////////
+
+test('getListFromApi', (t) => {
+  const uri = 'https://api.scryfall.com/cards/search?q=c%3Awhite+mv%3D1'; // 592 results expected
+  const expectedLength = 592;
+  return scryfallService
+    ._getListFromApi(uri, (listData) => listData.length)
+    .then((length) => {
+      return t.is(length, expectedLength);
+    });
+});
