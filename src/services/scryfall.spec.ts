@@ -2,12 +2,9 @@ import test from 'ava';
 
 import { ParsedCard } from '../types';
 
-import {
-  getCard,
-  getCardPrintsAndDo,
-  getCardsAndDo,
-  getCardsBatch,
-} from './scryfall';
+import { ScryfallService } from './scryfall';
+
+const scryfallService = new ScryfallService();
 
 const testCases: Map<string, string> = new Map();
 testCases.set('Black Lotus', 'Black Lotus');
@@ -27,9 +24,9 @@ testCases.forEach((expected, input) => {
       customFlags: new Map(),
     };
 
-    return getCard(card).then((res) =>
-      t.is(res?.printed_name || res?.name, expected)
-    );
+    return scryfallService
+      .getCard(card)
+      .then((res) => t.is(res?.printed_name || res?.name, expected));
   });
 });
 
@@ -41,9 +38,9 @@ test('language override', (t) => {
     customFlags: new Map(),
   };
 
-  return getCard(card).then((res) =>
-    t.is(res?.printed_name, 'Tour de commandement')
-  );
+  return scryfallService
+    .getCard(card)
+    .then((res) => t.is(res?.printed_name, 'Tour de commandement'));
 });
 
 test('Unknown card', (t) => {
@@ -54,7 +51,7 @@ test('Unknown card', (t) => {
     customFlags: new Map(),
   };
 
-  return getCard(card).then((res) => t.is(res, undefined));
+  return scryfallService.getCard(card).then((res) => t.is(res, undefined));
 });
 
 test('batch fetch', (t) => {
@@ -73,7 +70,7 @@ test('batch fetch', (t) => {
     },
   ];
   const expectedNames = ['Tour de commandement', 'Black Lotus'];
-  return getCardsBatch(cards).then((res) => {
+  return scryfallService.getCardsBatch(cards).then((res) => {
     const fetchedNames = res.map((card) => card?.printed_name || card?.name);
     return t.deepEqual(fetchedNames, expectedNames);
   });
@@ -109,58 +106,61 @@ test('getCardsAndDo', (t) => {
   ];
 
   const results: { name: string; ok: boolean }[] = [];
-  return getCardsAndDo(input, (data, card) => {
-    if (
-      data.customData &&
-      data.customData === `This is a ${card?.printed_name || card?.name}`
-    ) {
-      results.push({ name: data.name, ok: true });
-    } else {
-      results.push({ name: data.name, ok: false });
-    }
-  }).then(() => {
-    if (results.length !== input.length) {
-      return t.fail();
-    }
-    const inputNames = input.map((i) => i.name);
-    const resultNames = results.map((r) => r.name);
+  return scryfallService
+    .getCardsAndDo(input, (data, card) => {
+      if (
+        data.customData &&
+        data.customData === `This is a ${card?.printed_name || card?.name}`
+      ) {
+        results.push({ name: data.name, ok: true });
+      } else {
+        results.push({ name: data.name, ok: false });
+      }
+    })
+    .then(() => {
+      if (results.length !== input.length) {
+        return t.fail();
+      }
+      const inputNames = input.map((i) => i.name);
+      const resultNames = results.map((r) => r.name);
 
-    if (!inputNames.every((name) => resultNames.includes(name))) {
-      t.fail();
-    }
-    if (!results.every((r) => r.ok)) {
-      t.fail();
-    }
-    return t.pass();
-  });
+      if (!inputNames.every((name) => resultNames.includes(name))) {
+        t.fail();
+      }
+      if (!results.every((r) => r.ok)) {
+        t.fail();
+      }
+      return t.pass();
+    });
 });
 
 test('getCardsAndDoError', (t) => {
   let outcome: string;
-  return getCardsAndDo(
-    [
-      {
-        name: "Ceci n'est pas une carte.",
-        quantity: 0,
-        language: undefined,
-        customFlags: new Map(),
-        customData: 'This is a not a card',
-      },
-    ],
-    (input, foundCards) => {
-      if (input.customData !== 'This is a not a card') {
-        outcome = 'No custom data';
-      } else if (foundCards !== undefined) {
-        outcome = 'card is defined';
-      } else {
-        outcome = 'success';
+  return scryfallService
+    .getCardsAndDo(
+      [
+        {
+          name: "Ceci n'est pas une carte.",
+          quantity: 0,
+          language: undefined,
+          customFlags: new Map(),
+          customData: 'This is a not a card',
+        },
+      ],
+      (input, foundCards) => {
+        if (input.customData !== 'This is a not a card') {
+          outcome = 'No custom data';
+        } else if (foundCards !== undefined) {
+          outcome = 'card is defined';
+        } else {
+          outcome = 'success';
+        }
       }
-    }
-  ).then(() => {
-    return t.is(outcome, 'success')
-  });
+    )
+    .then(() => {
+      return t.is(outcome, 'success');
+    });
 });
-
 
 ////////////////////////////////////////////////////////////////////////////////
 //                             getCardPrintsAndDo                             //
@@ -168,26 +168,28 @@ test('getCardsAndDoError', (t) => {
 
 test('getCardPrintsAndDoError', (t) => {
   let outcome: string;
-  return getCardPrintsAndDo(
-    [
-      {
-        name: "Ceci n'est pas une carte.",
-        quantity: 0,
-        language: undefined,
-        customFlags: new Map(),
-        customData: 'This is a not a card',
-      },
-    ],
-    (input, foundCards) => {
-      if (input.customData !== 'This is a not a card') {
-        outcome = 'No custom data';
-      } else if (foundCards !== undefined) {
-        outcome = 'card is defined';
-      } else {
-        outcome = 'success';
+  return scryfallService
+    .getCardPrintsAndDo(
+      [
+        {
+          name: "Ceci n'est pas une carte.",
+          quantity: 0,
+          language: undefined,
+          customFlags: new Map(),
+          customData: 'This is a not a card',
+        },
+      ],
+      (input, foundCards) => {
+        if (input.customData !== 'This is a not a card') {
+          outcome = 'No custom data';
+        } else if (foundCards !== undefined) {
+          outcome = 'card is defined';
+        } else {
+          outcome = 'success';
+        }
       }
-    }
-  ).then(() => {
-    return t.is(outcome, 'success')
-  });
+    )
+    .then(() => {
+      return t.is(outcome, 'success');
+    });
 });
