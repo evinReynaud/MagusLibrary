@@ -57,9 +57,21 @@ test('Unknown card', (t) => {
 test('batch fetch', (t) => {
   const cards: ParsedCard[] = [
     {
+      name: 'm3c/331',
+      quantity: 0,
+      language: undefined,
+      customFlags: new Map(),
+    },
+    {
       name: 'm3c/331/de',
       quantity: 0,
       language: 'fr',
+      customFlags: new Map(),
+    },
+    {
+      name: 'This should not resolve as it is not a valid card',
+      quantity: 0,
+      language: undefined,
       customFlags: new Map(),
     },
     {
@@ -69,7 +81,7 @@ test('batch fetch', (t) => {
       customFlags: new Map(),
     },
   ];
-  const expectedNames = ['Tour de commandement', 'Black Lotus'];
+  const expectedNames = ['Command Tower', 'Tour de commandement', undefined, 'Black Lotus'];
   return scryfallService.getCardsBatch(cards).then((res) => {
     const fetchedNames = res.map((card) => card?.printed_name || card?.name);
     return t.deepEqual(fetchedNames, expectedNames);
@@ -199,8 +211,8 @@ test('getCardPrintsAndDoError', (t) => {
 ////////////////////////////////////////////////////////////////////////////////
 
 test('getListFromApi', (t) => {
-  const uri = 'https://api.scryfall.com/cards/search?q=c%3Awhite+mv%3D1'; // 592 results expected
-  const expectedLength = 592;
+  const uri = 'https://api.scryfall.com/cards/search?q=c%3Awhite+mv%3D1'; // 593 results expected
+  const expectedLength = 593;
   return scryfallService
     ._getListFromApi(uri, (listData) => listData.length)
     .then((length) => {

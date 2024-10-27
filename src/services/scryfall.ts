@@ -1,4 +1,4 @@
-import { ParsedCard, ScryfallCard } from '../types';
+import { ParsedCard, ScryfallCard, ScryfallCollectionIdentifier } from '../types';
 
 import { Delayer } from './delayer';
 
@@ -29,11 +29,14 @@ export class ScryfallService {
   /* Calls the Scryfall API to fetch card data for the given ParsedCard.
    */
   public getCard(parsedCard: ParsedCard): Promise<ScryfallCard | undefined> {
-    let requestURI: string;
+    return this._callApi(this._getUri(parsedCard));
+  }
 
+  // When updating this function, please consider also updating _toIdentifier
+  private _getUri(parsedCard: ParsedCard): string {
     if (this.uuidRegexp.test(parsedCard.name)) {
       // Name is a UUID, so we request the direct endpoint
-      requestURI = `${this.SCRYFALL_API_URI}/cards/${parsedCard.name}`;
+      return `${this.SCRYFALL_API_URI}/cards/${parsedCard.name}`;
     } else if (this.codeNumberRegexp.test(parsedCard.name)) {
       // Name is a code, so we request the direct endpoint with modifications
       // for the language
@@ -46,14 +49,44 @@ export class ScryfallService {
           parsedCard.name.split('/').slice(0, 2).join('/') +
           `/${parsedCard.language}`;
       }
-      requestURI = `${this.SCRYFALL_API_URI}/cards/${cardCode}`;
+      return `${this.SCRYFALL_API_URI}/cards/${cardCode}`;
     } else {
-      requestURI = `${
-        this.SCRYFALL_API_URI
-      }/cards/named/?fuzzy=${encodeURIComponent(parsedCard.name)}`;
+      return `${this.SCRYFALL_API_URI}/cards/named/?fuzzy=${encodeURIComponent(
+        parsedCard.name
+      )}`;
     }
+  }
 
-    return this._callApi(requestURI);
+  // When updating this function, please consider also updating _getUri
+  private _toIdentifier(parsedCard: ParsedCard): ScryfallCollectionIdentifier {
+    if (this.uuidRegexp.test(parsedCard.name)) {
+      // Name is a UUID
+      return { id: parsedCard.name };
+    } else if (
+      parsedCard.language != null &&
+      parsedCard.language != 'en' &&
+      this.validLanguages.includes(parsedCard.language)
+    ) {
+      // Scryfall collection endpoint does not support languages other than english,
+      // except when getting by id. As such, if a specific language is requested,
+      // we forge a purposefully erroneous identifier to trigger manual search.
+      return { name: `${parsedCard.name} -l=${parsedCard.language}` };
+    } else if (this.codeNumberRegexp.test(parsedCard.name)) {
+      // Name is a code, maybe with a language (in which case we fail as above)
+      const parts = parsedCard.name.split('/');
+      if (
+        parts.length > 2 &&
+        parts[2] != 'en' &&
+        this.validLanguages.includes(parts[2])
+      ) {
+        // We have a valid language, failing as above
+        return { name: `${parsedCard.name} -l=${parts[2]}` };
+      } else {
+        return { set: parts[0], collector_number: parts[1] };
+      }
+    } else {
+      return { name: parsedCard.name };
+    }
   }
 
   /* Given a ScryfallCard, return all prints of that card.
@@ -75,17 +108,105 @@ export class ScryfallService {
     );
   }
 
-  /* Calls the Scryfall API with delay to fetch cards data for the given
-   * `ParsedCard` array.
+  /* This function calls the Scryfall collection API with delay to fetch
+   * cards data for the given `parsedCard` array, and returns an array of the
+   * results.
+   * If any cards cannot be found, it tries searching them individually.
+   * If cards are still not found, undefined is returned.
    */
   public getCardsBatch(
-    parsedCard: ParsedCard[]
+    parsedCards: ParsedCard[]
   ): Promise<(ScryfallCard | undefined)[]> {
-    return Promise.all(
-      parsedCard.map(
-        (card: ParsedCard): Promise<ScryfallCard | undefined> =>
-          this.getCard(card)
+    // We map all parsedCards to their corresponding ScryfallCollectionIdentifier
+    const identifiers = parsedCards.map((card) => this._toIdentifier(card));
+
+    // We crate a map linking an identifier back to its original position
+    // in the parsedCards array.
+    // This is to allow us to insert the cards that the collection endpoint could
+    // not locate back at their original position (the collection endpoint
+    // returns al the ScryfallCollectionIdentifier it could not resolve).
+    // We use a map of string as a map of ScryfallCollectionIdentifier would not match correctly on similar objects
+    const identifiersReverseMap = new Map<string, number>();
+    identifiers.forEach((id, index) => identifiersReverseMap.set(JSON.stringify(id), index));
+
+    // The collection endpoint only accepts up to 75 identifiers per call, so
+    // we divide the request and merge the responses later.
+    const chunks = chunk(identifiers, 75);
+
+    // We call the collection endpoint for each chunk
+    return Promise.all(chunks.map((chunk) => this._getCollection(chunk)))
+      // We merge the results (both data and errors)
+      .then((chunkedResults) =>
+        chunkedResults.reduce(
+          (prev, curr) => ({
+            data: [...prev.data, ...curr.data],
+            not_found: [...prev.not_found, ...curr.not_found]
+          }),
+          { data: [], not_found: [] }
+        )
       )
+      .then((results) => {
+        if (results.not_found.length === 0) {
+          // All cards were found first try!
+          return results.data;
+        } else {
+          // Some cards could not resolve. We retry them individually using
+          // the more permissive apis behind getCard
+          return this._fallbackNotFound(results.not_found, identifiersReverseMap, parsedCards)
+            // We insert the cards that were eventually found (or undefined
+            // if they could not be found) into their original position
+            .then((scryfallCardsWithId) =>
+              scryfallCardsWithId.reduce((
+                allCards: (ScryfallCard | undefined)[],
+                currentScryfallCard
+              ) => {
+                if (currentScryfallCard) {
+                  // We insert the element at its place
+                  allCards.splice(currentScryfallCard.id, 0, currentScryfallCard.card);
+                }
+                return allCards;
+              }, results.data)
+            );
+        }
+      });
+  }
+
+  private _getCollection(identifiers: ScryfallCollectionIdentifier[]): Promise<{
+    data: ScryfallCard[];
+    not_found: ScryfallCollectionIdentifier[];
+  }> {
+    return this._callApi(
+      `${this.SCRYFALL_API_URI}/cards/collection`,
+      (json) => json,
+      { method: 'POST', body: JSON.stringify({ identifiers: identifiers }), headers: {"Content-Type": "application/json"} }
+    );
+  }
+
+  private _fallbackNotFound(
+    identifiers: ScryfallCollectionIdentifier[],
+    identifiersReverseMap: Map<string, number>,
+    parsedCards: ParsedCard[]
+  ): Promise<({ card: ScryfallCard | undefined, id: number } | undefined)[]> {
+    return Promise.all(identifiers
+      // We retrieve the identifiers' original parsedCard and position
+      .map((identifier) => identifiersReverseMap.get(JSON.stringify(identifier)))
+      .map((id) =>
+        id !== undefined ? { card: parsedCards[id], id: id } : undefined
+      )
+      .map((card) => {
+        // This should always be the case
+        if (card) {
+          // We try and get the card from the original parsedCard using the most
+          // permissive api getCard
+          return this.getCard(card.card)
+            .then((scryfallCard) => {
+              return { card: scryfallCard, id: card.id };
+            });
+        } else {
+          // This should never happen
+          return Promise.resolve(undefined);
+        }
+      })
     );
   }
 
@@ -103,7 +224,7 @@ export class ScryfallService {
         name: card.name,
         quantity: card.quantity,
         language: card.language,
-        customFlags: card.customFlags,
+        customFlags: card.customFlags
       }).then((scryfallCard) => callback(card, scryfallCard));
       promises.push(promise);
     });
@@ -126,16 +247,16 @@ export class ScryfallService {
         name: card.name,
         quantity: card.quantity,
         language: card.language,
-        customFlags: card.customFlags,
+        customFlags: card.customFlags
       })
         .then(
           (scryfallCard): Promise<ScryfallCard[] | undefined> =>
             scryfallCard !== undefined
               ? this.getCardPrintsFromCard(
-                  scryfallCard,
-                  includeMultilingual,
-                  onlyPaper
-                )
+                scryfallCard,
+                includeMultilingual,
+                onlyPaper
+              )
               : Promise.resolve(undefined)
         )
         .then((scryfallPrints) => callback(card, scryfallPrints));
@@ -164,7 +285,7 @@ export class ScryfallService {
         if (json.has_more && json.next_page !== undefined) {
           return this._getListFromApi(json.next_page, (listData: T[]) => [
             ...json.data,
-            ...listData,
+            ...listData
           ]).then((allData: T[] | undefined) => {
             if (allData !== undefined) {
               return successCallback(allData);
@@ -183,13 +304,26 @@ export class ScryfallService {
    */
   private async _callApi<T>(
     uri: string,
-    successCallback: (json: any) => T | Promise<T> = (json) => json
+    successCallback: (json: any) => T | Promise<T> = (json) => json,
+    requestInit: RequestInit | undefined = undefined
   ): Promise<T | undefined> {
-    const res = await this.delayer.execute(() => fetch(uri));
+    const res = await this.delayer.execute(() => fetch(uri, requestInit));
     if (res.ok) {
       return res.json().then(successCallback);
     } else {
       return Promise.resolve(undefined);
     }
   }
+}
+
+function chunk<T>(array: T[], maxSize: number): T[][] {
+  const res = [];
+  let start = 0;
+  let end = maxSize;
+  do {
+    res.push(array.slice(start, end));
+    start += maxSize;
+    end += maxSize;
+  } while (end <= array.length);
+  return res;
 }

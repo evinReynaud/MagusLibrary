@@ -138,6 +138,26 @@ export type ScryfallImageUris = {
   border_crop: URI | undefined;
 };
 
+export type ScryfallCollectionIdentifier = {
+  id: UUID
+} | {
+  mtgo_id: number
+} | {
+  multiverse_id: number
+} | {
+  oracle_id: UUID
+} | {
+  illustration_id: UUID
+} | {
+  name: string
+} | {
+  name: string
+  set: string
+} | {
+  set: string,
+  collector_number: string
+};
+
 export type UUID = string;
 export type URI = string;
 export type Colors = Color[];
