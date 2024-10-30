@@ -1,2 +1,2 @@
 export * from './parser';
-export * from './scryfall';
+export * from './scryfall-helper';

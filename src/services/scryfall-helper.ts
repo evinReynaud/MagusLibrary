@@ -1,12 +1,17 @@
-import { ParsedCard, ScryfallCard, ScryfallCollectionIdentifier } from '../types';
+import {
+  ParsedCard,
+  ScryfallCard,
+  ScryfallCollectionIdentifier,
+  ScryfallError,
+  ScryfallList,
+  ScryfallResultList
+} from '../types';
 
-import { Delayer } from './delayer';
+import { ScryfallService } from './scryfall.service';
 
-export class ScryfallService {
-  private SCRYFALL_API_URI = 'https://api.scryfall.com';
-  private API_DELAY_MS = 100;
+type DataAndNotFound = {data: ScryfallCard[], not_found: ScryfallCollectionIdentifier[] };
 
-  private delayer: Delayer = new Delayer(this.API_DELAY_MS);
+export class ScryfallHelper {
 
   private uuidRegexp =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -24,40 +29,81 @@ export class ScryfallService {
     'ru',
     'zhs',
     'zht',
+    'any'
   ];
+
+  private service: ScryfallService;
+
+  constructor(service: ScryfallService = new ScryfallService()) {
+    this.service = service;
+  }
 
   /* Calls the Scryfall API to fetch card data for the given ParsedCard.
    */
   public getCard(parsedCard: ParsedCard): Promise<ScryfallCard | undefined> {
-    return this._callApi(this._getUri(parsedCard));
+    return this._callApi(this._getCardFetch(parsedCard));
   }
 
   // When updating this function, please consider also updating _toIdentifier
-  private _getUri(parsedCard: ParsedCard): string {
+  private _getCardFetch(parsedCard: ParsedCard): () => Promise<ScryfallCard | ScryfallError> {
     if (this.uuidRegexp.test(parsedCard.name)) {
       // Name is a UUID, so we request the direct endpoint
-      return `${this.SCRYFALL_API_URI}/cards/${parsedCard.name}`;
+      return () => this.service.cardsId(parsedCard.name);
     } else if (this.codeNumberRegexp.test(parsedCard.name)) {
-      // Name is a code, so we request the direct endpoint with modifications
-      // for the language
-      let cardCode = parsedCard.name;
+      // Name is a code, so we request the collector number endpoint with
+      // modifications for the language
+      const setAndCollectorNumber = parsedCard.name.split('/');
       if (
         parsedCard.language != null &&
         this.validLanguages.includes(parsedCard.language)
       ) {
-        cardCode =
-          parsedCard.name.split('/').slice(0, 2).join('/') +
-          `/${parsedCard.language}`;
+        return () => this.service.cardsCollectorNumber(
+          setAndCollectorNumber[0],
+          setAndCollectorNumber[1],
+          parsedCard.language
+        );
       }
-      return `${this.SCRYFALL_API_URI}/cards/${cardCode}`;
+      if (setAndCollectorNumber.length > 2) {
+        return () => this.service.cardsCollectorNumber(
+          setAndCollectorNumber[0],
+          setAndCollectorNumber[1],
+          setAndCollectorNumber[2]
+        );
+      }
+      return () => this.service.cardsCollectorNumber(
+        setAndCollectorNumber[0],
+        setAndCollectorNumber[1],
+      );
     } else {
-      return `${this.SCRYFALL_API_URI}/cards/named/?fuzzy=${encodeURIComponent(
-        parsedCard.name
-      )}`;
+      if (parsedCard.language) {
+        const queryWithExtras = `${parsedCard.name} include:extras lang:${parsedCard.language || 'any'}`;
+        return () => this._getFirstCard(this.service.cardsSearch(queryWithExtras));
+      } else {
+        // This endpoint uses a clever algorithm to match the intended card
+        // For instance, "Black Lotus" matches cards named "Black Lotus", but not "Blacker Lotus"
+        return () => this.service.cardsNamed(parsedCard.name);
+      }
     }
   }
 
-  // When updating this function, please consider also updating _getUri
+  private _getFirstCard(cardsResolver: Promise<ScryfallList<ScryfallCard> | ScryfallError>): Promise<ScryfallCard | ScryfallError> {
+    return cardsResolver.then((result): Promise<ScryfallCard | ScryfallError> => {
+      if (result.object === 'error') {
+        return Promise.resolve(result);
+      } else if(result.data.length > 0) {
+        return Promise.resolve(result.data[0]);
+      } else {
+        return Promise.resolve({
+          object: 'error',
+          status: 404,
+          code: 'No cards found',
+          details: 'No cards found'
+        });
+      }
+    })
+  }
+
+  // When updating this function, please consider also updating _getCardFetch
   private _toIdentifier(parsedCard: ParsedCard): ScryfallCollectionIdentifier {
     if (this.uuidRegexp.test(parsedCard.name)) {
       // Name is a UUID
@@ -103,9 +149,17 @@ export class ScryfallService {
       ? `${scryfallCard.prints_search_uri}&include_multilingual=true`
       : scryfallCard.prints_search_uri;
 
-    return this._getListFromApi(url, (cards: ScryfallCard[]) =>
-      onlyPaper ? cards.filter((card) => card.games.includes('paper')) : cards
-    );
+    return this.service.getAllListElements(
+      () => this.service.getURI<ScryfallList<ScryfallCard> | ScryfallError>(url)
+    ).then((result: ScryfallList<ScryfallCard> | ScryfallError): (ScryfallCard[] | undefined) => {
+      if (result.object === 'error') {
+        return undefined;
+      } else if(onlyPaper) {
+        return result.data.filter((card) => card.games.includes('paper'));
+      } else {
+        return result.data;
+      }
+    });
   }
 
   /* This function calls the Scryfall collection API with delay to fetch
@@ -134,11 +188,17 @@ export class ScryfallService {
     const chunks = chunk(identifiers, 75);
 
     // We call the collection endpoint for each chunk
-    return Promise.all(chunks.map((chunk) => this._getCollection(chunk)))
+    return Promise.all(chunks.map((chunk) => this.service.cardsCollection(chunk)))
+      .then((results) => {
+        if (results.some((res) => res.object === 'error')) {
+          throw new Error();
+        }
+        return results as ScryfallResultList[];
+      })
       // We merge the results (both data and errors)
       .then((chunkedResults) =>
         chunkedResults.reduce(
-          (prev, curr) => ({
+          (prev: DataAndNotFound, curr: ScryfallResultList): DataAndNotFound => ({
             data: [...prev.data, ...curr.data],
             not_found: [...prev.not_found, ...curr.not_found]
           }),
@@ -169,17 +229,6 @@ export class ScryfallService {
             );
         }
       });
-  }
-
-  private _getCollection(identifiers: ScryfallCollectionIdentifier[]): Promise<{
-    data: ScryfallCard[];
-    not_found: ScryfallCollectionIdentifier[];
-  }> {
-    return this._callApi(
-      `${this.SCRYFALL_API_URI}/cards/collection`,
-      (json) => json,
-      { method: 'POST', body: JSON.stringify({ identifiers: identifiers }), headers: {"Content-Type": "application/json"} }
-    );
   }
 
   private _fallbackNotFound(
@@ -214,6 +263,7 @@ export class ScryfallService {
    * calls `callback` for each one with the input and the result from Scryfall
    * (undefined if no card was found or an error occurred).
    */
+
   public getCardsAndDo<T extends ParsedCard>(
     cards: T[],
     callback: (input: T, foundCard: ScryfallCard | undefined) => void
@@ -235,6 +285,7 @@ export class ScryfallService {
    * the given `cards` and calls `callback` for each one with the input and the
    * result from Scryfall (undefined if no card was found or an error occurred).
    */
+
   public getCardPrintsAndDo<T extends ParsedCard>(
     cards: T[],
     callback: (input: T, foundCards: ScryfallCard[] | undefined) => void,
@@ -265,51 +316,14 @@ export class ScryfallService {
     return Promise.all(promises).then();
   }
 
-  /* This function fetches a URI expected to return a list, and then fetches all
-   * the pages in the list.
-   *
-   * It is public only for testing and should not be used directly by the consumer
-   */
-  public _getListFromApi<T, U>(
-    uri: string,
-    successCallback: (listData: T[]) => U | Promise<U>
-  ): Promise<U | undefined> {
-    return this._callApi(
-      uri,
-      (json: {
-        data: T[];
-        has_more: boolean;
-        next_page: string | undefined;
-      }) => {
-        const data = json.data;
-        if (json.has_more && json.next_page !== undefined) {
-          return this._getListFromApi(json.next_page, (listData: T[]) => [
-            ...json.data,
-            ...listData
-          ]).then((allData: T[] | undefined) => {
-            if (allData !== undefined) {
-              return successCallback(allData);
-            } else {
-              return undefined;
-            }
-          });
-        } else {
-          return successCallback(data);
-        }
-      }
-    );
-  }
-
   /* This function factorizes some code for the handling of responses from the api.
    */
-  private async _callApi<T>(
-    uri: string,
-    successCallback: (json: any) => T | Promise<T> = (json) => json,
-    requestInit: RequestInit | undefined = undefined
-  ): Promise<T | undefined> {
-    const res = await this.delayer.execute(() => fetch(uri, requestInit));
-    if (res.ok) {
-      return res.json().then(successCallback);
+  private async _callApi(
+    apiCall: () => Promise<ScryfallCard | ScryfallError>
+  ): Promise<ScryfallCard | undefined> {
+    const res = await apiCall();
+    if (res.object !== 'error') {
+      return Promise.resolve(res);
     } else {
       return Promise.resolve(undefined);
     }

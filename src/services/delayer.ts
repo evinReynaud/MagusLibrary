@@ -1,5 +1,5 @@
 export class Delayer {
-  private promiseResolveQueue: { resolveFunc: (value: unknown) => void; promise: Promise<any> }[] = [];
+  private promiseResolveQueue: { resolveFunc: (value: unknown) => void; promise: Promise<unknown> }[] = [];
 
   private alreadyExecuting = false;
 

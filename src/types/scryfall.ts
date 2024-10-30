@@ -1,4 +1,5 @@
 export type ScryfallCard = {
+  object: 'card';
   // Core Cards Fields
   arena_id?: number;
   id: UUID;
@@ -9,7 +10,6 @@ export type ScryfallCard = {
   tcgplayer_id?: number;
   tcgplayer_etched_id?: number;
   cardmarket_id?: number;
-  object: string;
   layout: string;
   oracle_id?: UUID;
   prints_search_uri: URI;
@@ -164,3 +164,25 @@ export type UUID = string;
 export type URI = string;
 export type Colors = Color[];
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G';
+
+export type ScryfallError = {
+  object: 'error';
+  status: number;
+  code: string;
+  details: string;
+  type?: string;
+  warnings?: string[] | null;
+};
+
+export type ScryfallList<T> = {
+  object: 'list';
+  data: T[];
+  has_more: boolean;
+  next_page?: URI;
+  total_cards?: number; // Only if this is a list of cards
+  warnings?: string[];
+};
+
+export type ScryfallResultList = ScryfallList<ScryfallCard> & {
+  not_found: ScryfallCollectionIdentifier[]
+}
