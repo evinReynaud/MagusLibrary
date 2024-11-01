@@ -39,12 +39,21 @@ export class ScryfallHelper {
   }
 
   /* Calls the Scryfall API to fetch card data for the given ParsedCard.
+   * If `firstTry` is false (default), will try many increasingly probable but
+   * less accurate searches.
+   * Otherwise, will only try the most accurate search.
    */
-  public getCard(parsedCard: ParsedCard): Promise<ScryfallCard | undefined> {
-    return this._callApi(this._getCardFetch(parsedCard));
+  public getCard(parsedCard: ParsedCard, firstTry = true): Promise<ScryfallCard | undefined> {
+    if (firstTry) {
+      return this._callApi(this._getCardFetch(parsedCard));
+    } else {
+      const possibleSearches = this._getPossibleCardsFetches(parsedCard);
+      return this._callApiUntilFound(possibleSearches);
+    }
   }
 
-  // When updating this function, please consider also updating _toIdentifier
+  // When updating this function, please consider also updating
+  // _getPossibleCardsFetches and _toIdentifier
   private _getCardFetch(parsedCard: ParsedCard): () => Promise<ScryfallCard | ScryfallError> {
     if (this.uuidRegexp.test(parsedCard.name)) {
       // Name is a UUID, so we request the direct endpoint
@@ -86,6 +95,65 @@ export class ScryfallHelper {
     }
   }
 
+  /* This function returns an array of possible search queries for a given card,
+   * ranging from most specific and most likely to fail, to least specific and
+   * least likely to fail
+   *
+   * When updating this function, please consider also updating _getCardFetch and
+   * _toIdentifier
+   */
+  private _getPossibleCardsFetches(parsedCard: ParsedCard): (() => Promise<ScryfallCard | ScryfallError>)[] {
+    const fetches = [];
+    if (this.uuidRegexp.test(parsedCard.name)) {
+      // Name is a UUID, so we request the direct endpoint
+      fetches.push(() => this.service.cardsId(parsedCard.name));
+    }
+    if (this.codeNumberRegexp.test(parsedCard.name)) {
+      // Name is a code, so we request the direct endpoint with modifications
+      // for the language
+      const setAndCollectorNumber = parsedCard.name.split('/');
+      if (
+        parsedCard.language != null &&
+        this.validLanguages.includes(parsedCard.language)
+      ) {
+        fetches.push(() => this.service.cardsCollectorNumber(
+          setAndCollectorNumber[0],
+          setAndCollectorNumber[1],
+          parsedCard.language
+        ));
+      }
+      if (setAndCollectorNumber.length > 2) {
+        fetches.push(() => this.service.cardsCollectorNumber(
+          setAndCollectorNumber[0],
+          setAndCollectorNumber[1],
+          setAndCollectorNumber[2]
+        ));
+      }
+      fetches.push(() => this.service.cardsCollectorNumber(
+        setAndCollectorNumber[0],
+        setAndCollectorNumber[1],
+      ));
+    }
+
+    if (parsedCard.language) {
+      const query = `${parsedCard.name} lang:${parsedCard.language}`;
+      fetches.push(() => this._getFirstCard(this.service.cardsSearch(query)));
+      fetches.push(() => this._getFirstCard(this.service.cardsSearch(`${query} include:extras`)));
+    } else {
+      fetches.push(() => this._getFirstCard(this.service.cardsSearch(parsedCard.name)));
+      fetches.push(() => this._getFirstCard(this.service.cardsSearch(`${parsedCard.name} include:extras`)));
+    }
+
+    // This endpoint uses a clever algorithm to match the intended card
+    // For instance, "Black Lotus" matches cards named "Black Lotus", but not "Blacker Lotus"
+    fetches.push(() => this.service.cardsNamed(parsedCard.name));
+
+    const lastChanceQuery = `${parsedCard.name} include:extras lang:any`;
+    fetches.push(() => this._getFirstCard(this.service.cardsSearch(lastChanceQuery)));
+
+    return fetches;
+  }
+
   private _getFirstCard(cardsResolver: Promise<ScryfallList<ScryfallCard> | ScryfallError>): Promise<ScryfallCard | ScryfallError> {
     return cardsResolver.then((result): Promise<ScryfallCard | ScryfallError> => {
       if (result.object === 'error') {
@@ -104,6 +172,7 @@ export class ScryfallHelper {
   }
 
   // When updating this function, please consider also updating _getCardFetch
+  // and _getPossibleCardsFetches
   private _toIdentifier(parsedCard: ParsedCard): ScryfallCollectionIdentifier {
     if (this.uuidRegexp.test(parsedCard.name)) {
       // Name is a UUID
@@ -327,6 +396,23 @@ export class ScryfallHelper {
     } else {
       return Promise.resolve(undefined);
     }
+  }
+
+  /* Calls the given uris in order until one returns a non-undefined result
+   */
+  private async _callApiUntilFound(
+    apiCalls: (() => Promise<ScryfallCard | ScryfallError>)[]
+  ): Promise<ScryfallCard | undefined> {
+    if (apiCalls.length < 1) {
+      return Promise.resolve(undefined);
+    }
+    let res = undefined;
+    let i = 0;
+    do {
+      res = await this._callApi(apiCalls[i]);
+      i += 1;
+    } while (res === undefined && i < apiCalls.length);
+    return res;
   }
 }
 
